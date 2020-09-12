@@ -13,6 +13,10 @@ import sqlalchemy
 import pickle
 from flask_migrate import Migrate
 import psycopg2
+import boto3, botocore
+from werkzeug.utils import secure_filename
+from werkzeug.datastructures import  FileStorage
+
 
 
 
@@ -20,6 +24,7 @@ import psycopg2
 
 
 app = Flask(__name__)
+
 
 model= pickle.load(open('model.pkl','rb'))
 
@@ -30,10 +35,15 @@ app.config['MYSQL_USER'] = 'ifbvgdtixghczw'
 app.config['MYSQL_PASSWORD'] = '6876463bb34f435637f4cce7b7d05347bab636dda0d6955ccc1e96a1f06ff999'
 app.config['MYSQL_DB'] = 'db3u50742op9k3'
 app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
-
 app.config['SECRET_KEY'] = "Pass1234"
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_PERMANENT'] = False
+
+
+S3_BUCKET = ""
+S3_KEY = ""
+S3_SECRET = "++"
+S3_LOCATION = ''
 
 conn = psycopg2.connect(
     database="db3u50742op9k3",
@@ -42,6 +52,32 @@ conn = psycopg2.connect(
     host="ec2-54-204-26-236.compute-1.amazonaws.com",
     port='5432'
 )
+#s3 connection 
+s3 = boto3.client(
+   "s3",
+   aws_access_key_id=S3_KEY,
+   aws_secret_access_key=S3_SECRET
+)
+
+#s3 file load
+# def upload_file_to_s3(file, bucket_name):
+    
+#     try:
+
+#         s3.upload_fileobj(
+#             file,
+#             bucket_name,
+#             file.filename
+           
+#         )
+
+#     except Exception as e:
+#         # This is a catch all exception, edit this part to fit your needs.
+#         print("Oops: ", e)
+#         return e
+#     return "{}{}".format(S3_LOCATION, file.filename)
+
+
 
 # init MYSQL
 #mysql = MySQL(app)
@@ -174,8 +210,6 @@ def login():
 
     
 
-    
-
 
 #Log out
 @app.route('/logout')
@@ -200,58 +234,117 @@ def table():
 
 
 # Uploads path
-app.config['CSV_FILES'] = '/static/Uploads'
+# app.config['CSV_FILES'] = '/s3/buckets/p.odhiambos3projectbucket'
 
-# #upload CSV File
-# @app.route("/add_file", methods=['GET','POST'])
-# @is_logged_in
-# # def add_file(csv_file: UploadFile= File()):
-# #     file = request.files.get("csvfile")
+#upload CSV File
+# 
+# Create a directory in a known location to save files to.
+upload_dir = os.path.join(app.instance_path, 'uploads')
+os.makedirs(upload_dir, exist_ok=True)
 
-#     return file
-    #     if request.files:
+@app.route('/add_file', methods=['GET', 'POST'])
+def upload():
+    if request.method == 'POST':
+        # save the single "profile" file
+        user_file = request.files['user_file']
+        user_file.save(os.path.join(upload_dir, secure_filename(user_file.filename)))
+        file_path = upload_dir+'/'+user_file.filename
+        with open(file_path, 'r') as csv_file:
+            data = pd.read_csv(csv_file)
+            data=pd.DataFrame(data)
+            print (data)
 
-    #         csv = (request.files["csv"])
-    #         csv.save(os.path.join(app.config['CSV_FILES'],csv.filename))
-    #         file_path = app.config['CSV_FILES']+csv.filename
-    #         with open(file_path, 'r') as csv_file:
-    #             data = pd.read_csv(csv_file)
+            prediction = model.predict(data)
 
-                
-    #             data.to_sql(
-    #                 name='trialdata_tbl',
-    #                 con=conn,
-    #                 index=False,
-    #                 if_exists='replace'
+    #prediction = model.predict(uploaded_file)
+
+        if prediction == 0:
+            result = 'I predict this is a GOOD TRANSACTION'
+            return render_template('/predict.html', prediction_text=result)
+            # flash('The Transaction is a credible one')
+
+        elif prediction == 1:
+            result = 'I suspect this is a FRAUDULENT TRANSACTION'
+            return render_template('/predict.html', prediction_text=result)
+            # flash('The Transaction is a suspected FRAUD TRANSACTION')
+        else:
+            print('I am still training.')
+            
+        return render_template('/predict.html', prediction_text=prediction)    
+    #         data.to_sql(
+    #             name='trialdata_tbl',
+    #             con=conn,
+    #             index= False,
+    #             if_exists='replace'
     #             )
             
-    #         return redirect(url_for('predict'))
+    #     return redirect(url_for('predict'))
 
 
     # return render_template("add_file.html")
 
+        # save each "charts" file
+        # for file in request.files.getlist('user-file'):
+        #     file.save(os.path.join(upload_dir, secure_filename(file.name)))
+
+        return redirect(url_for('dashboard'))
+
+    return render_template('add_file.html')
+    
+
+# @app.route("/add_file", methods=['GET','POST'])
+# @is_logged_in
+# def add_file():
+#     if request.method =='POST':
+#         if request.form: 
+#             csv = (request.form["csv"])
+#             csv.save(os.path.join(app.config['CSV_FILES'],csv.filename))
+#             file_path = app.config['CSV_FILES']+csv.filename
+#             print(file_path)
+#             with open(file_path, 'r') as csv_file:
+#                 data = pd.read_csv(csv_file)
+
+                
+#                 data.to_sql(
+#                     name='trialdata_tbl',
+#                     con=conn,
+#                     index=False,
+#                     if_exists='replace'
+#                 )
+            
+#             return redirect(url_for('predict'))
+
+
+#     return render_template("add_file.html")
+
+
+
+
+
+
 #prediction route
-@app.route('/predict', methods=['GET','POST'])
-@is_logged_in
-def predict():
+# @app.route('/predict', methods=['GET','POST'])
+# @is_logged_in
+# def predict():
 
-    uploaded_file = pd.read_sql_table('trialdata_tbl',conn)
+#     #uploaded_file = pd.read_sql_table('trialdata_tbl',conn)
+#     prediction = model.predict(data)
 
-    prediction = model.predict(uploaded_file)
+#     #prediction = model.predict(uploaded_file)
 
-    if prediction == 0:
-        result = 'I predict this is a GOOD TRANSACTION'
-        return render_template('/predict.html', prediction_text=result)
-        # flash('The Transaction is a credible one')
+#     if prediction == 0:
+#         result = 'I predict this is a GOOD TRANSACTION'
+#         return render_template('/predict.html', prediction_text=result)
+#         # flash('The Transaction is a credible one')
 
-    elif prediction == 1:
-        result = 'I suspect this is a FRAUDULENT TRANSACTION'
-        return render_template('/predict.html', prediction_text=result)
-        # flash('The Transaction is a suspected FRAUD TRANSACTION')
-    else:
-        print('I am still training.')
+#     elif prediction == 1:
+#         result = 'I suspect this is a FRAUDULENT TRANSACTION'
+#         return render_template('/predict.html', prediction_text=result)
+#         # flash('The Transaction is a suspected FRAUD TRANSACTION')
+#     else:
+#         print('I am still training.')
         
-    return render_template('/predict.html', prediction_text=prediction)
+#     return render_template('/predict.html', prediction_text=prediction)
 
 
 if __name__ == "__main__":
